@@ -4,9 +4,17 @@
 import enum
 from functools import partial
 
-import lazy_object_proxy
 
-whitespace = ('\s', '\t', '\n', '\r')
+whitespace = (' ', '\t', '\n', '\r')
+
+
+class WrapAsCallable(object):
+
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+
+    def __call__(self):
+        return self.wrapped
 
 
 @enum.unique
@@ -25,7 +33,7 @@ class DataType(enum.Enum):
 class ParseResult(enum.IntEnum):
 
     ok = 0
-    except_value = 10
+    expect_value = 10
     invalid_value = 20
     root_not_singular = 30
 
@@ -51,45 +59,48 @@ class ParserContext(object):
 
     def current_n_char_till_end(self, n):
         upper_limit = self.pos + n if self.pos + n < \
-                len(self.json) else len(self.json)-1
+                len(self.json) else len(self.json)
         return self.json[self.pos: upper_limit]
 
 
 class JsonParser(object):
 
     def parse_json(self, json_value, json):
-        # Not allown imput args as None 
+        # Not allow json_value as None 
         assert(json_value is not None)
-        assert(json is not None)
+
         json_value.v_type = DataType.null
         parser_context = ParserContext(json)
         self.parse_whitespace(parser_context)
-        return self.parse_value(parser_context, json_value)
+        ret = self.parse_value(parser_context, json_value)
+        if ret == ParseResult.ok:
+            self.parse_whitespace(parser_context)
+            if parser_context.pos < len(json):
+                ret = ParseResult.root_not_singular
+        return ret
+
 
     def parse_value(self, parser_context, json_value):
         # NOTE: Should parse_whitespace move here??
-        print("current_char is:")
-        print(parser_context.current_char)
         parser_dict = {
-            None: ParseResult.ok,
-            'n': self.parse_null(parser_context, json_value),
-            't': self.parse_true(parser_context, json_value),
-            'f': self.parse_false(parser_context, json_value),
+            None: WrapAsCallable(ParseResult.expect_value),
+            'n': partial(self.parse_null, parser_context, json_value),
+            't': partial(self.parse_true, parser_context, json_value),
+            'f': partial(self.parse_false, parser_context, json_value),
             # TODO: More here 
         }
         return parser_dict.get(parser_context.current_char,
-                ParseResult.invalid_value)
+                WrapAsCallable(ParseResult.invalid_value))()
     
-    @lazy_object_proxy.Proxy
     def parse_whitespace(self, parser_context):
         """
         white_space = (%x20 / %x09 / %x0A / %x0D) 
 
         """
         while(parser_context.current_char in whitespace):
+#            print("this is in ***%s***" % parser_context.current_char)
             parser_context.pos += 1
 
-    @lazy_object_proxy.Proxy
     def parse_null(self, parser_context, json_value):
         """
         null = "null"
@@ -102,7 +113,6 @@ class JsonParser(object):
         json_value.v_type = DataType.null
         return ParseResult.ok
 
-    @lazy_object_proxy.Proxy
     def parse_true(self, parser_context, json_value):
         """
         true = "true"
@@ -115,7 +125,6 @@ class JsonParser(object):
         json_value.v_type = DataType.true
         return ParseResult.ok
 
-    @lazy_object_proxy.Proxy
     def parse_false(self, parser_context, json_value):
         """
         false = "false"
